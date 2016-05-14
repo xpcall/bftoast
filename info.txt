@@ -1,0 +1,30 @@
+Brainf*ck Toast Compiler project
+
+The goal of bftoast is to have a high level statically typed language that compiles to size optimized brainfuck.
+
+Stack managment:
+	Every object used in bftoast gets pushed to the right of the stack
+	There are two types of objects on the stack:
+		Static objects:
+			These objects either have a known size at compile time or are finalized
+			For example ints
+		Dynamic objects:
+			These objects can dynamically grow on the stack to the right
+			For example strings
+	Issues happen when multiple dynamic objects need to exist at the same time since obviously you cant have two strings expanding infinitely in the same place
+	To allow multiple dynamic objects at once, multiple stacks are multiplexed together as one dynamic object on the end of the parent stack
+	Code running on the child stacks just has its < and > commands multiplied
+
+Default functions:
+	print()     -- outputs text appending a newline
+	write()     -- outputs text without a newline
+	read(int)   -- reads a number of characters
+	readline()  -- reads up to a newline
+	sizeof(...) -- gets size of object
+	bf(...)     -- executes brainfuck code
+
+Default types:
+	int<n>                -- int of n bytes
+	string                -- simple string surrounded by 0s
+	array<t>              -- array holding dynamic number of t type values
+	func<params><returns> -- pointer to function in the current task
