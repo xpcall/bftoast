@@ -15,6 +15,15 @@ Stack managment:
 	To allow multiple dynamic objects at once, multiple stacks are multiplexed together as one dynamic object on the end of the parent stack
 	Code running on the child stacks just has its < and > commands multiplied
 
+Tasks:
+	Tasks are internal program structures that allow the program to have non-inlined functions
+	The objects the task uses to manage functions:
+		int<1> continue
+		array<int> call stack
+		container 
+
+
+
 Default functions:
 	print()     -- outputs text appending a newline
 	write()     -- outputs text without a newline
@@ -24,7 +33,48 @@ Default functions:
 	bf(...)     -- executes brainfuck code
 
 Default types:
-	int<n>                -- int of n bytes
+	int<n>                -- int of n bytes (default 1)
 	string                -- simple string surrounded by 0s
 	array<t>              -- array holding dynamic number of t type values
 	func<params><returns> -- pointer to function in the current task
+
+Syntax:
+	number             -- number constant
+	"string"           -- string constant
+	'c'                -- char constant
+
+	qualifier typename -- type qualifiers
+	typename           -- simple type
+	typename<...>      -- type with template parameters
+	statement;         -- statements end with semicolons to prevent ambiguity
+
+	Statements:
+		typename foo;          -- decleration
+		foo = ...;             -- definition
+		typename foo = ...;    -- decleration + definition
+		[typename,...] func([typename foo, ...]) statement; -- function definition
+		foo(...);              -- function call
+        (...)(...);            -- dynamic function call
+        if (...) statement;    -- if statement
+        while (...) statement; -- while loop
+
+    Operators:
+    	x ^ y           -- exponent
+    	not x , !x      -- logical not
+    	-x              -- negative
+    	x ~ y           -- xor
+    	x * y           -- multiply
+    	x / y           -- divide
+    	x + y           -- add
+    	x - y           -- subtract
+    	x .. y          -- concat
+    	x < y           -- less than
+    	x > y           -- greater than
+    	x <= y          -- less or equal
+    	x >= y          -- greater or equal
+    	x != y, x ~= y  -- not equal
+    	x == y          -- equal
+    	x and y, x && y -- logical and
+    	x or y, x || y  -- logical or
+    	x ? y : z       -- ternary
+
