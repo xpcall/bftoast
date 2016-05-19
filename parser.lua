@@ -156,27 +156,42 @@ function toast.parse(ctx, txt)
 	local function readInline()
 		local expSections = {}
 		local done = false
+		local last = "none"
 		while not done do
 			done = true
 			skipWhitespace()
-			local const = readConst()
-			if const then
-				done = false
-				table.insert(expSections, const)
-			elseif txt:sub(1,1) == "(" then
-				done = false
-				skip(1)
-				table.insert(expSections, readInline())
-				skipWhitespace()
-				if txt:sub(1,1) ~= ")" then
-					error("')' expected")
+			if last == "none" or last == "operator" then
+				local const = readConst()
+				if const then -- parse inline constants
+					done = false
+					table.insert(expSections, const)
+					last = "const"
+				elseif txt:sub(1,1) == "(" then -- parse inline parentheses
+					done = false
+					skip(1)
+					table.insert(expSections, readInline())
+					skipWhitespace()
+					if txt:sub(1,1) ~= ")" then
+						error("')' expected")
+					end
+					skip(1)
+					last = "code"
+				else -- parse inline variable / function call
+					local varname = readWord()
+					skipWhitespace()
+					if txt:sub(1,1) == "(" do -- inline function call
+						local fcall = {}
+						while txt:sub(1,1) == "(" do -- handle multiple function calls, ex. "foo(...)(...)"
+							skip(1)
+							readParams()
+						end
+					end
 				end
-				skip(1)
 			else
 				for k,v in pairs(ctx.operators) do
-					if txt:match("^"..pescape(k)) then
+					if txt:match("^"..pescape(v[1])) then
 						done = false
-						table.insert(expSections, {"operator", k})
+						table.insert(expSections, {"operator", v[1]})
 						break
 					end
 				end
@@ -185,18 +200,25 @@ function toast.parse(ctx, txt)
 		if #expSections == 0 then
 			return false
 		end
-		-- order operators
-		local idx = 1
-		while expSections[idx] do
-			local c = expSections[idx]
-			local prev = expSections[idx - 1]
-			local nxt = expSections[idx + 1]
-			if c[1] == "operator" then
-				if ctx.operators[c[2]][2] == "_x"
+		-- order and seperate operators
+		while #expSections > 1 do
+			-- this logic depends on the assumption that operators in expSections are always seperating values
+			if expSections[1][1] == "operator" then -- preceeding unary operator
+				local po
+				for k,v in pairs(ctx.operators) do
+					if v[1] == expSections[1][2] and v[3] == "_x" then
+						po = k
+						break
+					end
+				end
+				if not po then
+					error("Operator '" .. expSections[1][2] .. "' not unary")
+				end
+			else
+				if #expSections == 2 then -- 
 			end
-			idx = idx + 1
 		end
-
+		return 
 	end
 
 	local function readStatement()
