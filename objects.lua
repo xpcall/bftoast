@@ -1,4 +1,3 @@
-local toast.objects
 toast.objects = {
 	["int"] = {
 		["init"] = function(ctx, meta)
@@ -38,7 +37,7 @@ toast.objects = {
 		["copy"] = function(ctx, meta, meta2)
 			return toast.objects.int.copymulti(meta, {meta2s})
 		end,
-	},\
+	},
 
 	-- simple string, text is surrounded in 0s so it can be seeked over
 	["string"] = {

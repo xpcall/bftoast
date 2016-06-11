@@ -16,7 +16,7 @@ toast.funcs = {
 				{"bf", ">[,>]"},
 				{"seeked", "s_right"},
 			}
-		else if toast.getTypeString(params[1]) == "array<int<1>>" then
+		elseif toast.getTypeString(params[1]) == "array<int<1>>" then
 			return {"code",
 				{"seek", params[1][3]},
 				{"bf", ">[>.>>]>"},

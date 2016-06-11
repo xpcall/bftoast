@@ -10,19 +10,22 @@ Stack managment:
 			For example ints
 		Dynamic objects:
 			These objects can dynamically grow on the stack to the right
-			For example strings
+			For example strings and arrays
 	Issues happen when multiple dynamic objects need to exist at the same time since obviously you cant have two strings expanding infinitely in the same place
 	To allow multiple dynamic objects at once, multiple stacks are multiplexed together as one dynamic object on the end of the parent stack
 	Code running on the child stacks just has its < and > commands multiplied
+	Life-cycle analysis:
+		This is a somewhat needed optimization feature because once a dynamic object is finalized the space after it
+		can be used by later objects down the line, without it the stack would get multiplexed for every single dynamic object
+		allocated in a scope
 
 Tasks:
-	Tasks are internal program structures that allow the program to have non-inlined functions
+	Tasks are internal structures that allow the program to have non-inlined functions
+	Recursive functions are also possible by pushing 
 	The objects the task uses to manage functions:
-		int<1> continue
+		cell continue (for yielding a task)
 		array<int> call stack
-		container 
-
-
+		container frame stack
 
 Default functions:
 	print()     -- outputs text appending a newline
@@ -33,10 +36,17 @@ Default functions:
 	bf(...)     -- executes brainfuck code
 
 Default types:
-	int<n>                -- int of n bytes (default 1)
-	string                -- simple string surrounded by 0s
-	array<t>              -- array holding dynamic number of t type values
+	cell -- a single brainfuck cell unit
+	int  -- 4 cells
+	long -- 8 cells
+		I have switched away from a variable sized int<n> type because it would require
+		a lot more work implementing for all the internal types
+
+	string                -- simple null-terminated string
+	array<t>              -- dynamic array holding up to 256 values of type t
+	bigarray<t>           -- like array but can hold 2^32 values 
 	func<params><returns> -- pointer to function in the current task
+	container             -- arbitrary container usually holding unseekable types
 
 Syntax:
 	number             -- number constant
@@ -48,33 +58,38 @@ Syntax:
 	typename<...>      -- type with template parameters
 	statement;         -- statements end with semicolons to prevent ambiguity
 
+	Type qualifiers:
+		const     -- constant value
+		final     -- value does not change
+		constexpr -- code is emulated at compile-time
+
 	Statements:
 		typename foo;          -- decleration
 		foo = ...;             -- definition
 		typename foo = ...;    -- decleration + definition
 		[typename,...] func([typename foo, ...]) statement; -- function definition
 		foo(...);              -- function call
-        (...)(...);            -- dynamic function call
-        if (...) statement;    -- if statement
-        while (...) statement; -- while loop
+		(...)(...);            -- dynamic function call
+		if (...) statement;    -- if statement
+		while (...) statement; -- while loop
 
-    Operators:
-    	x ^ y           -- exponent
-    	not x , !x      -- logical not
-    	-x              -- negative
-    	x ~ y           -- xor
-    	x * y           -- multiply
-    	x / y           -- divide
-    	x + y           -- add
-    	x - y           -- subtract
-    	x .. y          -- concat
-    	x < y           -- less than
-    	x > y           -- greater than
-    	x <= y          -- less or equal
-    	x >= y          -- greater or equal
-    	x != y, x ~= y  -- not equal
-    	x == y          -- equal
-    	x and y, x && y -- logical and
-    	x or y, x || y  -- logical or
-    	x ? y : z       -- ternary
+	Operators:
+		x ^ y           -- exponent
+		not x , !x      -- logical not
+		-x              -- negative
+		x ~ y           -- xor
+		x * y           -- multiply
+		x / y           -- divide
+		x + y           -- add
+		x - y           -- subtract
+		x .. y          -- concat
+		x < y           -- less than
+		x > y           -- greater than
+		x <= y          -- less or equal
+		x >= y          -- greater or equal
+		x != y, x ~= y  -- not equal
+		x == y          -- equal
+		x and y, x && y -- logical and
+		x or y, x || y  -- logical or
+		x ? y : z       -- ternary
 
