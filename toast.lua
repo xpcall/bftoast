@@ -5,11 +5,23 @@ dofile("defaultlib.lua")
 dofile("parser.lua")
 dofile("compiler.lua")
 dofile("debug.lua")
+exc = dofile("exception.lua")
 
-local potato = assert(toast.parse(toast.defaultctx, [[
-int foo;
-func potato() {
-	foo = foo + 1 ^ 69;
-};
-]]))
-print(cserialize(potato))
+exc.catch(function()
+	local potato, err = toast.parse(toast.defaultctx, [[
+	int x;
+	inline func potato(int y) {
+		x = x + y;
+	};
+	potato(69);
+	]])
+
+	if not potato then
+		print("Error")
+		print(err)
+	else
+		print(cserialize(potato))
+	end
+end, "lua_error", function(err, bt)
+	print(err .. " | " .. bt)
+end)

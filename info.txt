@@ -1,4 +1,4 @@
-Brainf*ck Toast Compiler project
+Toast Compiler project
 
 The goal of bftoast is to have a high level statically typed language that compiles to size optimized brainfuck.
 
@@ -13,7 +13,7 @@ Stack managment:
 			For example strings and arrays
 	Issues happen when multiple dynamic objects need to exist at the same time since obviously you cant have two strings expanding infinitely in the same place
 	To allow multiple dynamic objects at once, multiple stacks are multiplexed together as one dynamic object on the end of the parent stack
-	Code running on the child stacks just has its < and > commands multiplied
+	Code running on the child stacks just has its seek commands multiplied
 	Life-cycle analysis:
 		This is a somewhat needed optimization feature because once a dynamic object is finalized the space after it
 		can be used by later objects down the line, without it the stack would get multiplexed for every single dynamic object
@@ -23,28 +23,27 @@ Tasks:
 	Tasks are internal structures that allow the program to have non-inlined functions
 	Recursive functions are also possible by pushing 
 	The objects the task uses to manage functions:
-		cell continue (for yielding a task)
 		array<int> call stack
 		container frame stack
 
 Default functions:
-	print()     -- outputs text appending a newline
-	write()     -- outputs text without a newline
+	print(str)  -- outputs text appending a newline
+	write(str)  -- outputs text without a newline
 	read(int)   -- reads a number of characters
 	readline()  -- reads up to a newline
 	sizeof(...) -- gets size of object
 	bf(...)     -- executes brainfuck code
 
 Default types:
-	cell -- a single brainfuck cell unit
-	int  -- 4 cells
-	long -- 8 cells
+	cell  -- a single cell unit
+	short -- 2 cells
+	int   -- 4 cells
 		I have switched away from a variable sized int<n> type because it would require
 		a lot more work implementing for all the internal types
 
 	string                -- simple null-terminated string
 	array<t>              -- dynamic array holding up to 256 values of type t
-	bigarray<t>           -- like array but can hold 2^32 values 
+	bigarray<t>           -- like array but can hold 65536 values 
 	func<params><returns> -- pointer to function in the current task
 	container             -- arbitrary container usually holding unseekable types
 

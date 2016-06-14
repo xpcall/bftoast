@@ -7,10 +7,12 @@ inline func sendMsg(string channel, string text) {
 };
 
 sendCmd("NICK Toastbot");
-sendCmd("USER toast ~ ~ : Written in brainfuck");
+sendCmd("USER toast ~ ~ : Written in brainf*ck");
 
-array<func<>>
+array<func<string,string,string>> commandCallbacks;
 
 while (1) {
-	string cmd
+	string line = readLine();
+	cell idx = 0;
+	string command = "";
 }

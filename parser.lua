@@ -94,6 +94,18 @@ function table_merge(a, b)
 end
 
 function toast.parse(ctx, txt)
+	local otxt = txt
+
+	local function getIdx()
+		return #otxt - #txt
+	end
+
+	-- adds code index for debugging
+	local function addIdx(t)
+		t.idx = getIdx()
+		return t
+	end
+
 	local types = {ctx.types} -- we have to keep track of type names in the parser
 
 	local function isType(tpe)
@@ -105,7 +117,6 @@ function toast.parse(ctx, txt)
 		return false
 	end
 
-	local otxt = txt
 	-- in the lua implementation i am being lazy and using string.sub instead of indexes
 	-- for noticably better performance it would be better to store the index you are in the source string
  	local function skip(n)
@@ -153,7 +164,7 @@ function toast.parse(ctx, txt)
 			if not ctx.type_qualifiers[qual] then
 				if isType(qual) then -- got typename
 					skipWhitespace()
-					local tout = {"type", qual, qualifiers = quals, tparams = {}}
+					local tout = addIdx({"type", qual, qualifiers = quals, tparams = {}})
 					while txt:sub(1,1) == "<" do -- read template parameters
 						skip(1)
 						table.insert(tout.tparams, readParams())
@@ -184,21 +195,21 @@ function toast.parse(ctx, txt)
 		local num = txt:match("^%-?%d+%.?%d*")
 		if num then
 			skip(#num)
-			return {"constant", "number", tonumber(num)}
+			return addIdx({"constant", "number", tonumber(num)})
 		end
 
 		-- hexidecimal
 		local num = txt:match("^%-?0x%x+%.?%x+")
 		if num then
 			skip(#num)
-			return {"constant", "number", tonumber(num)}
+			return addIdx({"constant", "number", tonumber(num)})
 		end
 
 		-- char
 		local char = txt:match("^'(.)'")
 		if char then
 			skip(3)
-			return {"constant", "number", string.byte(char)}
+			return addIdx({"constant", "number", string.byte(char)})
 		end
 
 		-- string
@@ -208,7 +219,7 @@ function toast.parse(ctx, txt)
 			while txt:sub(1,1) ~= "\"" do -- \ handling
 				if txt == "" then
 					txt = otxt
-					error("No end of string")
+					exc.throw("parserError", "End of string expected")
 				end
 				local c = txt:sub(1,1)
 				skip(1)
@@ -220,7 +231,7 @@ function toast.parse(ctx, txt)
 				end
 			end
 			skip(1)
-			return {"constant", "string", str}
+			return addIdx({"constant", "string", str})
 		end
 
 		return false
@@ -250,16 +261,16 @@ function toast.parse(ctx, txt)
 					local params = readParams()
 					skipWhitespace()
 					if txt:sub(1,1) ~= ")" then
-						error("\")\" Expected")
+						exc.throw("parserError", "\")\" Expected")
 					end
 					skip(1)
 					done = false
 					if prev[1] == "reference" then
 						table.remove(expSections)
-						table.insert(expSections, {"ilcall", prev[2], params})
+						table.insert(expSections, addIdx({"ilcall", prev[2], params}))
 					else
 						table.remove(expSections)
-						table.insert(expSections, {"ilcall", "s_callptr", {prev}})
+						table.insert(expSections, addIdx({"ilcall", "s_callptr", {prev}}))
 					end
 				else
 					done = false
@@ -267,7 +278,7 @@ function toast.parse(ctx, txt)
 					table.insert(expSections, readInline())
 					skipWhitespace()
 					if txt:sub(1,1) ~= ")" then
-						error("')' expected")
+						exc.throw("parserError", "\")\" Expected")
 					end
 					skip(1)
 					last = "code"
@@ -301,7 +312,7 @@ function toast.parse(ctx, txt)
 				elseif not op and varname then -- variable name
 					if isType(varname) then
 						done = false
-						table.insert(expSections, {""})
+						table.insert(expSections, readType())
 					else
 						done = false
 						table.insert(expSections, {"reference", "u_"..varname})
@@ -362,7 +373,7 @@ function toast.parse(ctx, txt)
 			elseif #c == 1 then -- no operators
 				table_merge(co, c[1])
 			else
-				error("Invalid expression")
+				exc.throw("parserError", "Invalid expression")
 			end
 		end
 		return o
@@ -398,19 +409,19 @@ function toast.parse(ctx, txt)
 				txt = otxt
 				return false
 			end
-			error("\"func\" expected")
+			exc.throw("parserError", "\"func\" Expected")
 		end
 
 		-- read function name
 		skipWhitespace()
 		local funcname = readWord()
 		if not funcname then
-			error("function name expected")
+			exc.throw("parserError", "Function name expected")
 		end
 
 		skipWhitespace()
 		if txt:sub(1,1) ~= "(" then
-			error("\"(\" expected")
+			exc.throw("parserError", "\"(\" Expected")
 		end
 		skip(1)
 
@@ -423,9 +434,9 @@ function toast.parse(ctx, txt)
 			end
 			local arname = readWord()
 			if not arname then
-				error("argument name expected")
+				exc.throw("parserError", "Argument name expected")
 			end
-			table.insert(o, tpe)
+			table.insert(argl, {tpe, "u_" .. arname})
 			skipWhitespace()
 			if txt:sub(1,1) ~= "," then
 				break
@@ -435,13 +446,13 @@ function toast.parse(ctx, txt)
 
 		skipWhitespace()
 		if txt:sub(1,1) ~= ")" then
-			error("\")\" expected")
+			exc.throw("parserError", "\")\" Expected")
 		end
 		skip(1)
 
 		local st = assert(readStatement())
 		
-		return {"func", "u_" .. funcname, st}
+		return addIdx({"func", "u_" .. funcname, argl, st})
 	end
 
 	-- read statements, always ends with semicolons
@@ -450,7 +461,7 @@ function toast.parse(ctx, txt)
 		if func then
 			skipWhitespace()
 			if txt:sub(1,1) ~= ";" then
-				return false, "; expected"
+				exc.throw("parserError", "\";\" Expected")
 			end
 			skip(1)
 			return func
@@ -462,7 +473,7 @@ function toast.parse(ctx, txt)
 			local code = readCode()
 			skipWhitespace()
 			if txt:sub(1,1) ~= "}" then
-				return false, "} expected"
+				exc.throw("parserError", "\"}\" Expected")
 			end
 			skip(1)
 			return code
@@ -473,7 +484,7 @@ function toast.parse(ctx, txt)
 		if w == "while" then
 			skipWhitespace()
 			if txt:sub(1,1) ~= "(" then
-				error("\"(\" expected")
+				exc.throw("parserError", "\"(\" Expected")
 			end
 			skip(1)
 
@@ -481,16 +492,17 @@ function toast.parse(ctx, txt)
 
 			skipWhitespace()
 			if txt:sub(1,1) ~= ")" then
-				error("\")\" expected")
+				exc.throw("parserError", "\")\" Expected")
 			end
 			skip(1)
 
 			local st = readStatement()
 			if txt:sub(1,1) ~= ";" then
-				return false, "; expected"
+				exc.throw("parserError", "\";\" Expected")
 			end
 
-			return {"while", cond, st}
+			return addIdx({"while", cond, st})
+
 		elseif ctx.type_qualifiers[v] or isType(w) then
 			txt = otxt
 			local tpe = readType()
@@ -504,18 +516,18 @@ function toast.parse(ctx, txt)
 				skip(1)
 				local il2 = readInline()
 				if not il2 then
-					return false, "statement expected"
+					exc.throw("parserError", "Statement expected")
 				end
 				if txt:sub(1,1) ~= ";" then
-					return false, "; expected"
+					exc.throw("parserError", "\";\" Expected")
 				end
 				skip(1)
 				return {"code",
 					{"decl", tpe, varname},
-					{"assign", {"constant", "reference", }, il2},
+					{"assign", {"reference", varname}, il2},
 				}
 			else
-				error("\")\" expected")
+				exc.throw("parserError", "\")\" Expected")
 			end
 		else
 			txt = otxt
@@ -528,16 +540,21 @@ function toast.parse(ctx, txt)
 				skip(1)
 				local il2 = readInline()
 				if not il2 then
-					return false, "statement expected"
+					exc.throw("parserError", "Statement expected")
 				end
 				if txt:sub(1,1) ~= ";" then
-					return false, "; expected"
+					exc.throw("parserError", "\";\" Expected")
 				end
 				skip(1)
 				return {"assign", il, il2}
 			elseif txt:sub(1,1) ~= ";" then
-				return false, "; expected"
+				exc.throw("parserError", "\";\" Expected")
 			end
+
+			if il[1] == "reference" or il[1] == "constant" then
+				exc.throw("parserError", "Statement with no effect")
+			end
+
 			skip(1)
 			return il
 		end
@@ -551,7 +568,7 @@ function toast.parse(ctx, txt)
 			local st, err = readStatement()
 			if not st then
 				if #o == 1 then
-					return false, err
+					exc.throw("parserError", "Statement expected")
 				end
 				return o
 			end
@@ -559,16 +576,22 @@ function toast.parse(ctx, txt)
 		end
 	end
 
-	local o
-	local r,err = pcall(function()
-		o = assert(readCode())
+	return exc.catch(function()
+		local code = readCode()
 		skipWhitespace()
 		if #txt > 0 then
-			error("incomplete statement")
+			exc.throw("parserError", "Incomplete statement")
 		end
+		return code
+	end, "parserError", function(msg)
+		local sidx = #otxt - #txt
+		local eidx = #otxt - #txt
+		while sidx ~= 0 and not otxt:sub(sidx, sidx):match("[\t\r\n]") do
+			sidx = sidx - 1
+		end
+		while eidx ~= (#otxt + 1) and otxt:sub(eidx, eidx) ~= "\n" do
+			eidx = eidx + 1
+		end
+		return false, msg .. "\n" .. otxt:sub(sidx + 1, eidx - 1) .. "\n" .. (" "):rep((#otxt - #txt) - sidx) .. "^"
 	end)
-	if not r then
-		return false, err .." @ ".. (#otxt - #txt)
-	end
-	return o
 end
