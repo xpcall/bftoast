@@ -1,7 +1,3 @@
--- This code is messy and errors are not user-friendly
--- In the future there will be a nicer implementation utilizing exceptions
--- Due to the deadlines this is a lower priority
-
 -- Parser output documentation
 -- toast.parse(ctx, txt)
 --     returns the main block of code
@@ -22,13 +18,13 @@
 --     declares a variable name, converted to pushes and pops after life-cycle analysis
 -- {"assign", expression, expression}
 --     assignes a reference to 
--- {"func", varname, code}
+-- {"func", varname, arglist, code}
 --     function
 -- {"while", varname, code}
 --     simple while loop
 
 toast.defaultctx = {
-	operators = {
+	operators = { -- later this will just be filled by funcs.lua
 		{"^",  "o_pow", "x_x"},
 		{"not","o_not", "_x"},
 		{"!",  "o_not", "_x"},
@@ -181,7 +177,7 @@ function toast.parse(ctx, txt)
 					return false
 				end
 			else
-				table.insert(quals, qual)
+				quals[qual] = true
 			end
 		end
 	end
@@ -393,7 +389,7 @@ function toast.parse(ctx, txt)
 			cn = false
 			for k,v in pairs(ctx.func_qualifiers) do
 				if k == txt:sub(1, #k) then
-					table.insert(quals, k)
+					quals[k] = true
 					skip(#k)
 					skipWhitespace()
 					cn = true
@@ -452,7 +448,7 @@ function toast.parse(ctx, txt)
 
 		local st = assert(readStatement())
 		
-		return addIdx({"func", "u_" .. funcname, argl, st})
+		return addIdx({"func", "u_" .. funcname, quals, argl, st})
 	end
 
 	-- read statements, always ends with semicolons
