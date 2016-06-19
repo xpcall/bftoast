@@ -1,7 +1,7 @@
 -- This defines all the default types implementations
 toast.objects = {
 	["cell"] = {
-		["init"] = function(ctx, meta)
+		["init"] = function(ctx, meta, templ)
 			meta.static_size = 1
 			return {"code",
 				{"seek", meta[1]},
@@ -41,7 +41,7 @@ toast.objects = {
 	},
 
 	["int"] = {
-		["init"] = function(ctx, meta)
+		["init"] = function(ctx, meta, templ)
 			meta.static_size = 1 -- when bigger ints are supported this will be set higher
 			return {"code",
 				{"seek", meta[1]},
@@ -68,42 +68,35 @@ toast.objects = {
 
 	-- simple string, text is surrounded in 0s so it can be seeked over
 	["string"] = {
-		["dynamic"] = true,
-		["init"] = function(meta)
+		["init"] = function(ctx, meta, templ)
+			meta.dynamic = true
 			return {"code",
 				{"seek", name},
 				{"bf", "[-]>[-]<"}
 			}
 		end,
 		["seekleft"] = function(meta)
-			return {"code",
-				{"bf", "<[<]"}
-			}
+			return "<[<]"
 		end,
 		["seekright"] = function(meta)
-			return {"code",
-				{"bf", ">[>]>"}
-			}
+			return ">[>]>"
 		end,
 	},
 
 	-- internal structure
 	-- 0 item[index, data, temp0, temp1] ... 0
 	["array"] = {
-		["init"] = function(ctx, meta)
+		["init"] = function(ctx, meta, templ)
+			meta.dynamic = true
 			return {"code",
 				{"bf", "[-]>[-]<"}
 			}
 		end,
 		["seekleft"] = function(ctx,meta)
-			return {"code",
-				{"bf", "<<[<<<]"},
-			}
+			return "<<[<<<]"
 		end,
 		["seekright"] = function(ctx,meta)
-			return {"code",
-				{"bf", ">[>>>]>"},
-			}
+			return ">[>>>]>"
 		end,
 		["index"] = function(ctx, meta, meta2, meta3) -- this, index, output
 			return {"code", clobbers = {meta2},

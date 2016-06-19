@@ -129,6 +129,7 @@ function toast.compile(code)
 					table.remove(co, idx)
 					table.insert(co,idx, {"assign", {"reference", c.returnVarname}, })
 					idx = idx - 1
+
 				elseif c[1] == "ilcall" then -- {"ilcall", funcname, {...}}
 					local func = ctx.requireSymbol(c[2]) -- {"funcptr", qualifiers, arglist, codeSection}
 					if func[2].inline then
@@ -149,15 +150,68 @@ function toast.compile(code)
 
 		table.insert(codeSections, flatten(code))
 
-		do -- temporary for debuggin
-			return codeSections
-		end
+		print(cserialize(codeSections[1]))
 
 		-- assumption: every item in codeSections is flat
 
 		-- stack managment
 
-		
+		local mainSec = codeSections[1] -- right now we only care about the main chunk
+		local stack = {} -- todo: substacks
+		local used = {}
+		local meta = {}
+		local cstackpos = 1
+		local i = 1
+
+		local function codeMerge(c)
+			for j = 1, #c do
+				table.insert(mainSec, i + j - 1, c[j])
+			end
+			i = i - 1
+		end
+
+		while mainSec[i] do
+			local c = mainSec[i]
+			if c[1] == "push" then -- {"push", type, varname, meta}
+				table.insert(stack, c[2])
+				used[c[2]] = #stack
+				meta[c[2]] = c
+
+			elseif c[1] == "pop" then -- {"pop", name}
+				used[c[2]] = nil
+				while not used[stack[#stack]] do
+					if cstackpos > #stack then
+						local obj = meta[stack[#stack]]
+						if obj.static_size then
+							table.insert(mainSec, i, {"bf", ("<"):rep(obj.static_size)})
+						else
+							table.insert(mainSec, i, {"bf", obj.func.seekLeft(ctx, obj)})
+						end
+						i = i - 1
+
+					end
+					meta[c[2]] = nil
+					table.remove(stack)
+				end
+
+			elseif c[1] == "seek" then -- {"seek", name}
+				while cstackpos ~= used[c[2]] do
+					local obj = meta[stack[cstackpos]]
+					if cstackpos > used[c[2]] then
+						table.insert(mainSec, i, {"bf", obj.static_size and ("<"):rep(obj.static_size) or obj.func.seekLeft(ctx, obj)})
+						cstackpos = cstackpos - 1
+					else
+						table.insert(mainSec, i, {"bf", obj.static_size and (">"):rep(obj.static_size) or obj.func.seekRight(ctx, obj)})
+						cstackpos = cstackpos + 1
+					end
+				end
+
+			end
+
+			i = i + 1
+		end
+
+		return mainSec
 
 	end, "compilerError", function(msg, c)
 		local sidx = getCodeIdx(c)
