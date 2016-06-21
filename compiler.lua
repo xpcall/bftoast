@@ -90,8 +90,30 @@ function toast.compile(code)
 		-- this function converts all the sub blocks of code (function parameters, etc) into flat code chunks
 		local function flatten(co)
 			assert(co[1] == "code")
+
 			ctx.push()
 			local idx = 2
+
+			local function declobber(x)
+				if x[1] == "code" then
+					if x.clobbers then
+						for i = 1, #x.clobbers do
+							local c = x.clobbers[i]
+						end
+					end
+				end
+			end
+
+			local function merge(x)
+				if x[1] == "code" then
+					for l1 = 2, #x do
+						table.insert(co, idx + l1 - 2, x[l1])
+					end
+				else
+					table.insert(co, idx, x)
+				end
+			end
+
 			while co[idx] do
 				local c = co[idx]
 				if c[1] == "code" then -- {"code", ...}
@@ -123,22 +145,53 @@ function toast.compile(code)
 					ctx.scopeStack[1][c[3]] = c[2]
 
 				elseif c[1] == "return" then -- {"return", ...}
-					if not c.returnVarname then -- TODO: allow inline function calls to not be assigned
+					if not co.returnVarname then -- TODO: allow inline function calls to not be assigned
 						exc.throw("compilerError", "cannot return", c)
 					end
 					table.remove(co, idx)
-					table.insert(co,idx, {"assign", {"reference", c.returnVarname}, })
+					
+					table.insert(co,idx, {"assign", {"reference", co.returnVarname}, })
+					idx = idx - 1
+
+				elseif c[1] == "assign" then -- {"assign", expression, expression}
+					exc.assert(c[2][1] == "reference", "compilerError", "Complex references unsuported atm", c)
+					table.remove(co, idx)
+					table.insert(co,idx, {"ilcall", "o_copy", {c[2], c[3]})
 					idx = idx - 1
 
 				elseif c[1] == "ilcall" then -- {"ilcall", funcname, {...}}
-					local func = ctx.requireSymbol(c[2]) -- {"funcptr", qualifiers, arglist, codeSection}
-					if func[2].inline then
+					local func = ctx.requireSymbol(c[2])
+
+					ctx.push()
+					local arglist = {}
+					for k, v in pairs(c[3]) do
+						if v[1] == "code" then
+							local t = ctx.newTemp()
+							v.returnVarname = t
+							merge(flatten(v))
+							table.insert(arglist, {"reference", t})
+						else
+							table.insert(arglist, v)
+						end
+					end
+					
+					if func.builtin then
+						func[3](ctx, arglist, )
+					elseif func[2].inline then
 						table.remove(co, idx)
 						idx = idx - 1
+
+						merge(func[4])
+
 						-- incomplete
 					else
 						exc.throw("compilerError", "Tasks unsuported atm", c)
 					end
+
+					for k, v in pairs(ctx.pop()) do
+						table.insert(co, {"pop", k})
+					end
+
 				end -- missing a bunch more 
 				idx = idx + 1
 			end
@@ -205,7 +258,6 @@ function toast.compile(code)
 						cstackpos = cstackpos + 1
 					end
 				end
-
 			end
 
 			i = i + 1
