@@ -1,0 +1,68 @@
+Toast ASM
+
+Commands:
+	BF ...                           | Executes brainfuck
+	X <name>[ ...]                   | Includes section
+	PUSHSTACK <from> <name>[ ...]    | Initializes new stacks ontop of the specified stack
+	SCOPE <name>                     | Sets current scope to stack
+	PUSH <varname>[ <lseek> <rseek>] | Pushes varname to stack
+	POP <name>[ ...]                 | Pops varnames (left to right)
+	DEBUG                            | Prints debug information about the state at compile time
+
+Stacks:
+	Each stack has its own variable scope, it inherits variable names from its parent
+	Variables are used to keep track of where things are and they are pushed ontop of eachother statically at compile-time
+	These variables are not defined by type but rather how the compiler can seek over them, for example:
+		PUSH foo < > // this defines foo as a single cell
+		PUSH bar << >> // this defines foo as 2 cells
+		PUSH walrus <<[<] >[>]> // this defines walrus as a string that is \0 prefixed and teminated
+
+	Unseekables are variables which do not have lseek and rseek, therefore they must always be on the top of a stack
+	There is currently no safety mechanism that prevents you from unintentionally expanding a dynamically sized variable that is not on the top of the stack
+
+	A stack can have a number of children stacks using the PUSHSTACK command, these stacks act as a single unseekable variable
+	The parent cannot add or remove stacks unless the old ones are popped, popping one of the stacks defined there will destruct all of them
+		PUSHSTACK ^stack foo1 foo2 foo3
+		PUSH foo1:bar < >
+		POP foo1
+
+	Child stacks act just like normal stacks but have output code overhead from multiplexing
+
+	When seeking the compiler will automatically insert the code that seeks over variables and even traverse multiple children and parent stacks of different levels
+
+Sections:
+	@section_name [params ...]
+		command
+		...
+
+	Parameters are inlined (gsubbed in) using "~", for example:
+	@foo x
+		BF $~x+
+	@bar
+		PUSH potato
+		X foo potato
+
+	@_main is the section that gets compiled into code
+
+Special:
+	^S      | Main stack
+	^here   | Current value
+	^stack  | Gets variable's stack
+	^top    | Gets variable at the top of the stack
+	^up     | Gets variable ontop of it
+	^down   | Gets variable below it
+	^bottom | Gets variable at the bottom
+	^space  | Uninitialized space after ^top
+	^parent | Parent stack
+	^scope  | Current scope
+	^prev   | Stack before the previous SCOPE
+
+Brainfuck:
+	The level aka <> multiplier is automatically applied depending on where you are seeked to
+
+	$varname will seek to a varname
+	$=varname will indicate to that compiler that we are currently pointing to varname
+	<command><number> will repeat a single command n times
+	{<code>}<number> will repeat code n times
+	`<lua>` will execute lua code, the returned string is inserted into brainfuck code
+

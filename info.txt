@@ -39,7 +39,7 @@ Default types:
 	short -- 2 cells
 	int   -- 4 cells
 		I have switched away from a variable sized int<n> type because it would require
-		a lot more work implementing for all the internal types
+		a lot more work implementing the following for all the internal types
 
 	string                -- simple null-terminated string
 	array<t>              -- dynamic array holding up to 256 values of type t

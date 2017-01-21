@@ -14,11 +14,11 @@
 -- {"ilcall", funcname, {...}}
 --     inline function call
 --     third argument is a list of function parameters
--- {"decl", type, varname}
---     declares a variable name, converted to pushes and pops after life-cycle analysis
+-- {"push", type, varname}
+--     declares a variable name
 -- {"assign", expression, expression}
 --     assignes a reference to 
--- {"func", varname, arglist, code}
+-- {"func", varname, arglist, rettype, code}
 --     function
 -- {"while", varname, code}
 --     simple while loop
@@ -51,6 +51,7 @@ toast.defaultctx = {
 		["const"] = true,
 		["final"] = true,
 		["constexpr"] = true,
+		["replace"] = true,
 	},
 	func_qualifiers = {
 		["inline"] = true,
@@ -65,11 +66,42 @@ toast.defaultctx = {
 		v = "\v",
 	},
 	types = {
+		["ref"] = true,
 		["cell"] = true,
 		["int"] = true,
 		["long"] = true,
 	},
 }
+
+function toast.typeSignature(t)
+	if t[1] == "type" then
+		local o = ""
+		for i = 1, #t.quals do
+			o = o .. t.quals[i] .. " "
+		end
+		o = o .. t[2]
+		for i = 1, #t.tparams do
+			o = o .. "<"
+			for j = 1, #t.params[i] do
+				o = o .. toast.typeSignature(t)
+				if j ~= #t.params[i] then
+					o = o .. ","
+				end
+			end
+			o = o .. ">"
+		end
+	elseif t[1] == "constant" then
+		if t[2] == "number" then
+			return tostring(t[3])
+		elseif t[2] == "string" then
+			return (("%q"):format(t[3]):gsub("\\\n", "\\n"))
+		else
+			error("cannot serialize constant " .. t[2])
+		end
+	else
+		error("cannot serialize " .. t[1])
+	end
+end
 
 -- lua pattern escaper
 local function pescape(txt)
@@ -125,7 +157,7 @@ function toast.parse(ctx, txt)
 
 	local function readWord()
 		skipWhitespace()
-		local o = txt:match("^[%a_][%a_%d]*") -- expand pattern to support more characters in variable names
+		local o = txt:match("^[%%%a_][%a_%d]*") -- expand pattern to support more characters in variable names
 		if not o then
 			return false
 		end
@@ -160,7 +192,7 @@ function toast.parse(ctx, txt)
 			if not ctx.type_qualifiers[qual] then
 				if isType(qual) then -- got typename
 					skipWhitespace()
-					local tout = addIdx({"type", qual, qualifiers = quals, tparams = {}})
+					local tout = addIdx({"type", qual, quals = quals, tparams = {}})
 					while txt:sub(1,1) == "<" do -- read template parameters
 						skip(1)
 						table.insert(tout.tparams, readParams())
@@ -387,7 +419,7 @@ function toast.parse(ctx, txt)
 		local cn = true
 		while cn do
 			cn = false
-			for k,v in pairs(ctx.func_qualifiers) do
+			for k, v in pairs(ctx.func_qualifiers) do
 				if k == txt:sub(1, #k) then
 					quals[k] = true
 					skip(#k)
@@ -399,6 +431,8 @@ function toast.parse(ctx, txt)
 		end
 
 		skipWhitespace()
+		local rt = readType()
+		
 		local word = readWord()
 		if word ~= "func" then
 			if not next(quals) then
@@ -432,7 +466,7 @@ function toast.parse(ctx, txt)
 			if not arname then
 				exc.throw("parserError", "Argument name expected")
 			end
-			table.insert(argl, {tpe, "u_" .. arname})
+			table.insert(argl, {tpe, arname:sub(1, 1) == "%" and arname:sub(2) or "u_" .. arname})
 			skipWhitespace()
 			if txt:sub(1,1) ~= "," then
 				break
@@ -446,9 +480,18 @@ function toast.parse(ctx, txt)
 		end
 		skip(1)
 
+		local typeinfo = {"type", "func", quals = quals, tparams = {argl, next(rt) and rt}}
+
+		skipWhitespace()
+		if txt:sub(1, 1) == ";" then -- decleration
+			skip(1)
+			return addsIdx({"push", typeinfo, funcname:sub(1, 1) == "%" and funcname:sub(2) or "u_" .. funcname})
+		end
+
 		local st = assert(readStatement())
 		
-		return addIdx({"func", "u_" .. funcname, quals, argl, st})
+		-- push is inserted later by compiler.lua
+		return addIdx({"func", funcname:sub(1, 1) == "%" and funcname:sub(2) or "u_" .. funcname, quals, argl, rt, st})
 	end
 
 	-- read statements, always ends with semicolons
@@ -507,7 +550,7 @@ function toast.parse(ctx, txt)
 			skipWhitespace()
 			if txt:sub(1,1) == ";" then -- decleration
 				skip(1)
-				return {"decl", tpe, varname}
+				return {"push", tpe, varname:sub(1, 1) == "%" and varname:sub(2) or "u_" .. varname}
 			elseif txt:sub(1,1) == "=" then -- decleration + assignment
 				skip(1)
 				local il2 = readInline()
@@ -519,8 +562,8 @@ function toast.parse(ctx, txt)
 				end
 				skip(1)
 				return {"code",
-					{"decl", tpe, varname},
-					{"assign", {"reference", varname}, il2},
+					{"push", tpe, varname:sub(1, 1) == "%" and varname:sub(2) or "u_" .. varname},
+					{"assign", {"reference", varname:sub(1, 1) == "%" and varname:sub(2) or "u_" .. varname}, il2},
 				}
 			else
 				exc.throw("parserError", "\")\" Expected")

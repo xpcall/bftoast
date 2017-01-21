@@ -1,7 +1,10 @@
 -- This code compiles code put out by the parser
-function toast.compile(code)
+function toast.compile(code, otxt)
 	-- parser supplies code indexes useful for errors
 	local function getCodeIdx(code)
+		if not code then
+			return 0
+		end
 		while not code.idx do
 			code = code.parent
 			if not code then
@@ -21,50 +24,49 @@ function toast.compile(code)
 		end
 	end
 
-	local ctx = {
+	local ctx
+	ctx = {
 		scopeStack = {},
 
 		push = function()
-			table.insert(scopeStack, 1, {})
+			table.insert(ctx.scopeStack, 1, {})
 		end,
 
 		pop = function()
-			return table.remove(scopeStack, 1)
+			return table.remove(ctx.scopeStack, 1)
 		end,
 
 		getSymbol = function(s)
-			for i = 1, #scopeStack do
-				if scopeStack[i][s] then
-					return scopeStack[i][s]
+			for i = 1, #ctx.scopeStack do
+				if ctx.scopeStack[i][s] then
+					return ctx.scopeStack[i][s]
 				end
 			end
 		end,
 
 		requireSymbol = function(s, c)
-			local sm = getSymbol(s)
-			if not s then
+			local sm = ctx.getSymbol(s)
+			if not sm then
+				print(debug.traceback())
 				exc.throw("compilerError", "\"" .. s .. "\" not defined in this scope", c)
 			end
 			return sm
 		end,
 
+		tempNum = -1,
+
 		newTemp = function(txt)
-			txt = txt or "tmp"
-			local i = 0
-			while getSymbol(txt..i) do
-				i = i + 1
-			end
-			return txt..i
+			ctx.tempNum = ctx.tempNum + 1
+			return "tmp" .. ctx.tempNum
 		end,
 	}
 
 	return exc.catch(function()
-
 		local function iterateCode(c, func)
 			local idx = 2
 			while c[idx] do
 				idx = func(c, idx) or (idx + 1)
-				if c[idx][1] == "code" then
+				if c[idx] and c[idx][1] == "code" then
 					iterateCode(c[idx], func)
 				end
 			end
@@ -76,31 +78,40 @@ function toast.compile(code)
 		end)
 
 		-- refactor variable names
-		local function refactorSymbol(c, fname, tname)
+		local function refactorSymbol(code, fname, tname)
 			iterateCode(code, function(c, idx)
-				if c[1] == "define" and c[3] == fname then -- {"define", type_info, symbol_name}
+				if c[1] == "push" and c[3] == fname then -- {"push", type_info, symbol_name}
 					c[3] = tname
 				end
 				-- incomplete
 			end)
 		end
 
+		local function findMatchingFunc(name, args)
+
+
+		end
+
 		local codeSections = {}
 
 		-- this function converts all the sub blocks of code (function parameters, etc) into flat code chunks
-		local function flatten(co)
+		local flatten
+		function flatten(co)
 			assert(co[1] == "code")
 
-			ctx.push()
+			if not co.inline then
+				ctx.push()
+			end
 			local idx = 2
 
 			local function declobber(x)
 				if x[1] == "code" then
 					if x.clobbers then
 						for i = 1, #x.clobbers do
-							local c = x.clobbers[i]
+							local c = ctx.requireSymbol(x.clobbers[i])
+							ctx.scopeStack[1][ctx.newTemp()] = c[2]
 						end
-					end
+					end-- incomplete (refactor)
 				end
 			end
 
@@ -114,6 +125,73 @@ function toast.compile(code)
 				end
 			end
 
+			local resolveArgs
+			function resolveArgs(t) -- resolves code/ilcall to references
+				local o = {}
+				local ocode = {"code", inline = true}
+				for k, v in pairs(t) do
+					local cv = v
+					if cv[1] == "ilcall" then
+						local regs, rcode = resolveArgs(v[3])
+						table.insert(ocode, rcode)
+						local vret = ctx.newTemp()
+						cv = nil
+						local cfunc
+						for i = 1, #ctx.scopeStack do
+							local cstack = ctx.scopeStack[i]
+							for k, v in pairs(cstack) do
+								if v.type[2] == "func" and v.name == name and #v.type.tparams == #regs then
+									local match = true
+									for j = 1, #v.tparams[1] do
+										if toast.typeSignature(v.tparams[1][j]) ~= toast.typeSignature(requireSymbol(regs[j][2]).type) then
+											match = false
+											break
+										end
+									end
+
+									if match then
+										assert(v.section, "Undefined function")
+										table.insert(ocode, {"push", v.type.tparams[2][1], vret})
+										for j = 1, #vret do
+											if v.tparams[1][j][2] == "ref" then
+												table.insert(ocode, {"push", v.tparams[1][j].tparams[1][1]}, codeSections[v.section].params[j], alias = regs[j][2])
+											else
+												table.insert(ocode, {"push", v.tparams[1][j].tparams[1][1]}, codeSections[v.section].params[j])
+												table.insert(ocode, {"call", "o_copy"})
+											end
+										end
+										cv = {"reference", vret}
+									end
+								end
+							end
+						end
+						table.insert(ocode, {"call", v[2], regs, {cv}})
+					end
+
+					if cv[1] == "code" then
+						local t = ctx.newTemp()
+						cv.returnVarname = t
+						local cc = flatten(cv)
+						for i = 2, #cc do
+							table.insert(ocode, cc[i])
+						end
+						table.insert(o, {"reference", t})
+					elseif cv[1] == "constant" then
+						local t = ctx.newTemp()
+						assert(cv[2] == "number")
+						table.insert(ocode, {"bf", "$t[-]+" .. cv[3], {t = t}})
+						table.insert(o, {"reference", t})
+					elseif cv[1] == "reference" then
+						table.insert(o, cv)
+					else
+						print(debug.traceback())
+						exc.throw("compilerError", "cannot resolve type " .. tostring(cv[1] or cv), cv)
+					end
+				end
+
+				return o, ocode
+			end
+
 			while co[idx] do
 				local c = co[idx]
 				if c[1] == "code" then -- {"code", ...}
@@ -124,25 +202,51 @@ function toast.compile(code)
 					end
 					idx = idx - 1
 
-				elseif c[1] == "func" then -- {"func", symbol_name, qualifiers, arglist, code}
-					table.insert(codeSections, c[5])
-					ctx.push()
-					for k, v in pairs(c[4]) do
-						ctx.scopeStack[1][v[2]] = {"reference", v}
-					end
-					flatten(c[5])
-					for k, v in pairs(ctx.pop()) do
-						table.insert(c[5], {"pop", k})
-					end
+				elseif c[1] == "bf" and false then -- {"bf", codes, aliases}
 					table.remove(co, idx)
-					ctx.scopeStack[1][c[2]] = {"funcptr", qualifiers, arglist, #codeSections}
+					local aliases = c[3] or {}
+					local nstat = 0
+					local ccode = c[2]
+					local bcode = ""
+					while #ccode > 0 do
+						local vname = ccode:match("^$[%a_][%w_]*")
+						if vname then
+							if #bcode > 0 then
+								table.insert(co, idx + nstat, {"bf", bcode})
+								nstat = nstat + 1
+								bcode = ""
+							end
+							
+							table.insert(co, idx + nstat, {"seek", aliases[vname:sub(2)] or vname:sub(2)})
+							nstat = nstat + 1
+							ccode = ccode:sub(#vname + 1)
+						else
+							bcode = bcode .. ccode:sub(1, 1)
+							ccode = ccode:sub(2)
+						end
+					end
 
-				elseif c[1] == "define" then -- {"define", type_info, symbol_name}
+					if #bcode > 0 then
+						table.insert(co, idx + nstat, {"bf", bcode})
+						nstat = nstat + 1
+					end
+
+					idx = idx + nstat - 1
+
+				elseif c[1] == "func" then -- {"func", symbol_name, qualifiers, arglist, rettype, code}
+
+				elseif c[1] == "push" then -- {"push", type_info, symbol_name}
 					local existing = ctx.scopeStack[1][c[3]]
 					if existing then
-						table.insert(co, idx + 1, {"pop", c[3]})
+						error("exists " .. c[3])
+						table.insert(co, idx, {"pop", c[3]})
+						idx = idx + 1
 					end
 					ctx.scopeStack[1][c[3]] = c[2]
+
+				elseif c[1] == "pop" then -- {"pop", symbol_name}
+					assert(ctx.scopeStack[1][c[2]], c[2])
+					ctx.scopeStack[1][c[2]] = nil
 
 				elseif c[1] == "return" then -- {"return", ...}
 					if not co.returnVarname then -- TODO: allow inline function calls to not be assigned
@@ -156,47 +260,30 @@ function toast.compile(code)
 				elseif c[1] == "assign" then -- {"assign", expression, expression}
 					exc.assert(c[2][1] == "reference", "compilerError", "Complex references unsuported atm", c)
 					table.remove(co, idx)
-					table.insert(co,idx, {"ilcall", "o_copy", {c[2], c[3]})
+					table.insert(co,idx, {"ilcall", "o_copy", {c[2], c[3]}})
 					idx = idx - 1
 
 				elseif c[1] == "ilcall" then -- {"ilcall", funcname, {...}}
-					local func = ctx.requireSymbol(c[2])
-
-					ctx.push()
-					local arglist = {}
-					for k, v in pairs(c[3]) do
-						if v[1] == "code" then
-							local t = ctx.newTemp()
-							v.returnVarname = t
-							merge(flatten(v))
-							table.insert(arglist, {"reference", t})
-						else
-							table.insert(arglist, v)
-						end
-					end
-					
-					if func.builtin then
-						func[3](ctx, arglist, )
-					elseif func[2].inline then
-						table.remove(co, idx)
-						idx = idx - 1
-
-						merge(func[4])
-
-						-- incomplete
-					else
-						exc.throw("compilerError", "Tasks unsuported atm", c)
-					end
-
-					for k, v in pairs(ctx.pop()) do
-						table.insert(co, {"pop", k})
-					end
-
+					table.remove(co, idx)
+					local params, pcode = resolveArgs({c})
+					merge(pcode)
+					idx = idx - 1
+				elseif c[1] == "call" then -- {"call", funcname, {...params}, {...returns}}
+					-- c[3] and c[4] must only contain references
+					local stlfunc = assert(toast.funcs[c[2]], c[2])
+					table.remove(co, idx)
+					merge(assert(stlfunc(ctx, c[3], c[4]), c[2]))
+					idx = idx - 1
 				end -- missing a bunch more 
 				idx = idx + 1
 			end
-			for k, v in pairs(ctx.pop()) do
-				table.insert(co, {"pop", k})
+
+			if not co.inline then
+				for k, v in pairs(ctx.pop()) do
+					if v[1] == "type" then
+						table.insert(co, {"pop", k})
+					end
+				end
 			end
 			return co
 		end
@@ -205,11 +292,13 @@ function toast.compile(code)
 
 		print(cserialize(codeSections[1]))
 
+		do return "done" end
+
 		-- assumption: every item in codeSections is flat
 
 		-- stack managment
 
-		local mainSec = codeSections[1] -- right now we only care about the main chunk
+		--[=[local mainSec = codeSections[1] -- right now we only care about the main chunk
 		local stack = {} -- todo: substacks
 		local used = {}
 		local meta = {}
@@ -263,7 +352,7 @@ function toast.compile(code)
 			i = i + 1
 		end
 
-		return mainSec
+		return mainSec]=]
 
 	end, "compilerError", function(msg, c)
 		local sidx = getCodeIdx(c)
