@@ -1,6 +1,12 @@
 local function compile(txt)
 	local idx = 1
 	local out = ""
+	local codemeta = {
+		push = {},
+		pop = {},
+		seeks = {},
+		lines = {},
+	}
 	local erridx
 
 	local function getLine(nidx)
@@ -27,7 +33,7 @@ local function compile(txt)
 			return o ~= "" and tonumber(o)
 		end
 
-		local function readLine()
+		local function readLine()						
 			local o = txt:sub(idx):match("^[^\n]*")
 			idx = idx + #o
 			if txt:sub(idx, idx) == "\n" then
@@ -120,9 +126,9 @@ local function compile(txt)
 				elseif var == "^down" then
 					pvar = pvar or cvar
 					if pvar.pos <= 1 then
-						var = pvar.parent
+						var = assert(pvar.parent)
 					else
-						var = pvar.parent.stack[pvar.pos - 1]
+						var = assert(pvar.parent.stack[pvar.pos - 1], pvar.pos .. "," .. pvar.name)
 					end
 				elseif var == "^bottom" then
 					pvar = pvar or cstack
@@ -146,7 +152,7 @@ local function compile(txt)
 					pvar = pvar or cstack
 					var = pvar.vars[var]
 					if not var then
-						return false, "No such var \"" .. ovar .. "\" in \"" .. name .. "\"" 
+						return false, "No such var \"" .. ovar .. "\" in \"" .. name .. "\" top of \"" .. pvar.name ..  "\" is " .. (pvar.vars[#pvar.vars] or pvar.spacevar).name
 					end
 				end
 
@@ -163,6 +169,17 @@ local function compile(txt)
 			end)
 		end
 
+		local function getVarPos(var)
+			local o = {}
+
+			while var do
+				table.insert(o, 1, var.name)
+				var = var.parent
+			end
+
+			return table.concat(o, ":")
+		end
+
 		local function seek(var)
 			if cvar.stack then
 				cvar = cvar.stack[1] or cvar.spacevar
@@ -171,7 +188,7 @@ local function compile(txt)
 			if cvar == var then
 				return
 			end
-
+			
 			if var.stack then
 				seek(var.with)
 				out = out .. multiplySeek(">", cvar.parent.level * (var.splitpos - 1))
@@ -195,7 +212,7 @@ local function compile(txt)
 			if fromparents[var.parent] then -- target is below us
 				while cvar.parent ~= var.parent do
 					while cvar.pos ~= 1 do
-						cvar = getVar("^down")
+						cvar = assert(getVar("^down"), cvar.pos)
 						out = out .. multiplySeek(cvar.lseek, cvar.parent.level)
 					end
 
@@ -206,7 +223,7 @@ local function compile(txt)
 				while cvar.parent ~= var.parent do
 					while not cvar.split do
 						out = out .. multiplySeek(cvar.rseek, cvar.parent.level)
-						cvar = getVar("^up")
+						cvar = assert(getVar("^up"))
 					end
 
 					local tstack
@@ -222,7 +239,7 @@ local function compile(txt)
 					out = out .. multiplySeek(">", cvar.parent.level * (tstack - 1))
 					cvar = cvar.split[tstack].stack[1]
 				end
-			elseif assert(cvar.parent, "no cvar parent") ~= assert(var.parent, "no cvar parent") then -- target is on a different branch
+			elseif assert(cvar.parent, "no cvar parent") ~= assert(var.parent, "no var parent " .. tostring(var.name)) then -- target is on a different branch
 				local c = cvar
 				while c.parent do
 					if toparents[c.parent] then -- find common branch
@@ -239,15 +256,20 @@ local function compile(txt)
 				if cvar.pos < var.pos then
 					while cvar ~= var do
 						out = out .. multiplySeek(cvar.rseek, cvar.parent.level)
-						cvar = getVar("^up")
+						cvar = assert(getVar("^up"))
 					end
 				else
 					while cvar ~= var do
-						cvar = getVar("^down")
-						assert(cvar.lseek, cvar.parent.name .. ":" .. cvar.pos .. " has no lseek")
+						print("cvar = \"" .. tostring(cvar.name) .. "\" \"" .. tostring((cvar.parent or {}).name) .. "\"")
+						cvar = assert(getVar("^down"))
+						assert(cvar.lseek, cvar.parent.name .. ":" .. cvar.pos .. " \"" .. tostring(cvar.name) .. "\" has no lseek")
 						out = out .. multiplySeek(cvar.lseek, cvar.parent.level)
 					end
 				end
+			end
+
+			if not cvar.with and not cvar.split and cvar.name ~= "^space" then
+				codemeta.seeks[#out] = assert(getVarPos(cvar))
 			end
 		end
 
@@ -271,6 +293,12 @@ local function compile(txt)
 				local oline = code[i]
 				local line = {params = {}, idx = oline.idx}
 
+				codemeta.lines[#out + 1] = getLine(oline.idx)
+
+				for i = 1, #inclstack do
+					codemeta.lines[#out + 1] = codemeta.lines[#out + 1] .. "," .. (inclstack[i][2] and "line " .. getLine(inclstack[i][2]) or "Lua")
+				end
+
 				line.command = applyParams(oline.command)
 				for i = 1, #oline.params do
 					line.params[i] = applyParams(oline.params[i])
@@ -292,7 +320,7 @@ local function compile(txt)
 						:gsub("([%[%]<>%.,%+%-])(%d+)", function(c, rep)
 							return c:rep(tonumber(rep))
 						end)
-					)
+					)	
 					local bidx = 1
 					while bidx <= #bf do
 						local buf = bf:sub(bidx):match("^[^$]*")
@@ -300,7 +328,7 @@ local function compile(txt)
 						out = out .. multiplySeek(buf, cvar.level or cvar.parent.level)
 
 						if bf:sub(bidx, bidx) == "$" then
-							local cmd = bf:sub(bidx):match("^$([^%s%[%]<>%.,%+%-]+)")
+							local cmd = bf:sub(bidx):match("^$([^%s%[%]<>%.,%+%-$]+)")
 							bidx = bidx + #cmd + 1
 							if cmd:sub(1, 1) == "=" then
 								cvar = assert(getVar(cmd:sub(2)))
@@ -312,14 +340,14 @@ local function compile(txt)
 				elseif line.command == "X" then
 					incl(line.params[1], {unpack(line.params, 2)})
 				elseif line.command == "PUSHSTACK" then
-					local mstack = getVar(line.params[1])
+					local mstack = assert(getVar(line.params[1]))
 
 					local s = mstack.stack[#mstack.stack]
 					if s and (not s.rseek or s.split) then
 						error("Cannot push ontop of stack")
 					end
 
-					local val = {split = {}, parent = mstack, pos = #mstack.stack + 1}
+					local val = {name = line.params[2], split = {}, parent = mstack, pos = #mstack.stack + 1}
 					for i = 2, #line.params do
 						if line.params[1]:match(":") then
 							error("Dont use scope in stack names")
@@ -336,7 +364,7 @@ local function compile(txt)
 							with = val,
 							splitpos = i - 1,
 							level = mstack.level * (#line.params - 1),
-							vars = setmetatable({}, {__index = mstack.vars}),
+							vars = {},
 						}
 
 						stack.spacevar = {name = "^space", pos = 1, parent = stack}
@@ -347,6 +375,9 @@ local function compile(txt)
 
 					mstack.spacevar.pos = mstack.spacevar.pos + 1
 					table.insert(mstack.stack, val)
+					if cvar.name == "^space" and cvar.parent == stack then
+						cvar = val
+					end
 				elseif line.command == "PUSH" then
 					local name, lseek, rseek = line.params[1], line.params[2], line.params[3]
 
@@ -358,7 +389,7 @@ local function compile(txt)
 						error("Cannot push ontop of stack")
 					end
 
-					if getVar(name) then
+					if getVar(name, stack) then
 						error("Name already exists")
 					end
 
@@ -367,6 +398,17 @@ local function compile(txt)
 					stack.vars[rname] = var
 
 					stack.spacevar.pos = var.pos + 1
+					if cvar.name == "^space" and cvar.parent == stack then
+						cvar = var
+					end
+
+					local meta = {pos = getVarPos(var), lseek = lseek, rseek = rseek, level = stack.level}
+					if debugging then
+						out = out .. "$"
+					end
+					codemeta.push[#out] = meta
+
+					var.meta = meta
 				elseif line.command == "SCOPE" then
 					lstack = cstack
 					cstack = assert(getVar(line.params[1]))
@@ -380,9 +422,9 @@ local function compile(txt)
 						local var = assert(getVar(c))
 
 						if not var.stack and var.parent.stack[#var.parent.stack] ~= var then
-							error("Not top of stack")
-						elseif var.parent.stack[#var.parent.stack] ~= var.with then
-							error("Not top of stack")
+							error("Not top of stack \"" .. tostring(var.name) .. "\"" .. tostring(var.parent.stack[#var.parent.stack].name) .. "\"")
+						elseif var.stack and var.parent.stack[#var.parent.stack] ~= var.with then
+							error("Not top of stack \"" .. tostring(var.name) .. "\"" .. tostring(var.parent.stack[#var.parent.stack].name) .. "\"")
 						end
 
 						if var.stack then
@@ -392,13 +434,20 @@ local function compile(txt)
 						else
 							if cvar == var then
 								cvar = #var.parent.stack == 1 and var.parent or var.parent.spacevar
+								print("[top]")
 							elseif cvar == var.parent.spacevar then
-								seek("^down")
+								if cvar.pos == 1 then
+									cvar = assert(cvar.parent)
+								else
+									seek(assert(getVar("^down")))
+									cvar = var.parent.spacevar
+								end
 							end
 
 							table.remove(var.parent.stack)
 							var.parent.vars[var.name] = nil
 							var.parent.spacevar.pos = var.parent.spacevar.pos - 1
+							var.meta.to = #out
 						end
 					end
 				elseif line.command == "DEBUG" then
@@ -434,7 +483,7 @@ local function compile(txt)
 		return false
 	end
 
-	return out
+	return out, codemeta
 end
 
 --[[
@@ -490,13 +539,13 @@ Special:
 	^here   | Current value
 	^stack  | Gets variable's stack
 	^top    | Gets variable at the top of the stack
-	^up     | Gets variable ontop of it
+	^up     | Gets variable on top of it
 	^down   | Gets variable below it
 	^bottom | Gets variable at the bottom
 	^space  | Uninitialized space after ^top
 	^parent | Parent stack
 	^scope  | Current scope
-	^prev   | Stack before the previous SCOPE
+	^prev   | Stack before the previous SCOPE command
 
 Brainfuck:
 	The level aka <> multiplier is automatically applied depending on where you are seeked to
@@ -509,178 +558,11 @@ Brainfuck:
 
 ]]
 
---[[
-TESTING STRINGS AND MULTIPLE STACKS
-@_main
-	PUSH temp0 < >
-	PUSH temp1 < >
-	PUSHSTACK ^S foo1 foo2 foo3 foo4 foo5
-	PUSHSTACK foo3 bar1 bar2 bar3
-	X String.push foo3:bar2:myString
-	BF $temp0[-]+72
-	X String.append foo3:bar2:myString temp0
-	BF $temp0[-]+105
-	X String.append foo3:bar2:myString temp0
-	BF $temp0[-]+79
-	BF $temp1[-]+1
-	X String.set foo3:bar2:myString temp1 temp0
-	X String.print foo3:bar2:myString
-	BF $temp0[-]+2
-	X String.get foo3:bar2:myString temp0
-	BF $temp0.
-]]
+local out, codemeta = compile(assert(io.open(assert((...)), "r")):read("*a"))
 
-print(compile([==============================[
-@String.push str
-	PUSH ~str <<<<<<[<<<] >>>[>>>]>>>
-	BF $~str[-]>[-]>[-]>[-]>[-]>[-]>$=^up
-@String.get str i
-	BF $~i[$~str>+<$~i-] // str[0].tmp0 = i
-	BF $~str>[           // while tmp0
-	BF     -             // tmp0--
-	BF     [->>>+<<<]    // next tmp0 = tmp0
-	BF     >>>           // move to next tmp0
-	BF ]                 // we are at the tmp0 of the selected char
-	BF <[->+>+<<]        // tmp1,tmp0 = char
-	BF >[-<+>]           // char = tmp0
-	BF <[                // while char
-	BF     >>            // move to tmp1
-	BF     [-<<<+>>>]    // prev tmp1 = tmp1
-	BF     <<<<<         // move to prev char
-	BF ]>>               // we are at str[0].tmp1
-	BF [-<<              // while tmp1 tmp--
-	BF     $~i+$~str     // i++
-	BF >>]<<             // move to str[0].char
-@String.length str x
-	BF $~str>>>[                  // while char
-	BF     >+                     // tmp0++
-	BF     [->>>+<<<]             // next tmp0 = tmp0
-	BF     >>                     // move to next char
-	BF ]>                         // we are at the last tmp0
-	BF [->>$=^up$~x+$str:^up<<]>> // x = tmp0
-@String.append str c
-	BF $~str:^up                        // seek to after end of string
-	BF <<<+>>>[-]>[-]>[-]>              // initialize new char to 1
-	BF $~c-[-$~str:^up<<<<<<+>>>>>>$~c] // add x - 1 to char
-@String.set str i x
-	BF $~i[$~str>+<$~i-]   // str[0].tmp0 = i
-	BF $~x[$~str>>+<<$~x-] // str[0].tmp1 = i
-	BF $~str>[             // while tmp0
-	BF     -               // tmp0--
-	BF     [->>>+<<<]      // next tmp0 = tmp0
-	BF     >[->>>+<<<]     // next tmp1 = tmp1
-	BF     >>              // move to next tmp0
-	BF ]                   // we are at the tmp0 of the selected char
-	BF <[-]>>[-<<+>>]      // char = tmp1
-	BF >[>>>]>>>$=^up      // seek to after end of string
-@String.print str
-	BF $~str>>>[.>>>]>>>$=~str:^up
-@String.println str
-	BF $~str>>>[.>>>]>>+13.-3.[-]>$=~str:^up
-@String.readLine str
-	X String.push ~str
-	BF $~str >>>
-	BF ,-13[
-	BF     >[-]>[-]>
-	BF     ,-13
-	BF ]
-	BF >,[-]>[-]<<
-	BF <<<[+13<<<]
-@String.equal str1 str2 x s
-	BF $x[-]
+while out:match("><") or out:match("<>") do out = out:gsub("><",""):gsub("<>","") end
 
-	PUSH ~s:temp0 < >
-	PUSH ~s:temp1 < >
-	PUSH ~s:temp2 < >
-	PUSH ~s:temp3 < >
-
-	X String.length ~str1 ~s:temp0
-	X String.length ~str2 ~s:temp1
-	X copy ~s:temp1 ~s:temp0 ~s:temp3 // s:temp2 = s:temp0
-
-	BF $~s:temp2[-$~s:temp1-$~s:temp2]
-	X not temp1 temp2
-
-	BF $temp1[ // if lengths are equal
-		BF $~x[-]+ // x = 1
-		BF $~s:temp0[ // while s:temp0
-			X copy2 ~s:temp0 ~s:temp1 ~s:temp2 ~s:temp3 // s:temp1,s:temp2 = s:temp0
-			BF $~s:temp0-
-			X String.get ~str1 ~s:temp1
-			X String.get ~str2 ~s:temp2
-			BF $~s:temp2[-$~s:temp1-$~s:temp2] // s:temp1 = s:temp1 - s:temp2
-			BF $~s:temp1[ // if s:temp1
-				BF $~x[-] // x = 0
-				BF $~s:temp0[-] // temp0 = 0
-			BF $~s:temp1[-]]
-		BF $~s:temp0]
-	BF $temp1[-]]
-
-	POP ~s:temp3 ~s:temp2 ~s:temp1 ~s:temp0
-@lazyPrint tmp txt
-	BF $~tmp`return ("~txt"):gsub(".",function(c) return "[-]" .. ("+"):rep(c:byte()) .. "." end)`
-@lazyString str txt
-	X String.push ~str
-	BF $~str[-]>[-]>[-]>`return ("~txt"):gsub(".",function(c) return "[-]" .. ("+"):rep(c:byte()) .. ".>[-]>[-]>" end)`[-]>[-]>[-]>$=~str:^up
-@copy from to temp
-	BF $~temp[-]$~to[-]$~from[-$~to+$~temp+$~from]$~temp[-$~from+$~temp]
-@copy2 from to1 to2 temp
-	BF $~temp[-]$~to1[-]$~to2[-]$~from[-$~to1+$~to2+$~temp+$~from]$~temp[-$~from+$~temp]
-@not x temp
-	BF $~temp[-]+$~x[$~temp-$~x[-]]$~temp[-$~x+$~temp]
-@irc_readParam to
-	BF $temp1[-]+[ // while temp1 do
-		X copy temp0 temp2 temp3 // temp2 = temp0
-		BF $temp0+#temp0
-		X String.get s0:rawLine temp2 // temp2 = s0:rawLine[temp2]
-		X copy temp2 temp3 temp4 // temp3 = temp2
-		BF $temp4[-]+$temp3 #-32[$temp4- // if temp3 != 32
-			BF #append
-			X String.append ~to temp2 // append temp2 to our string
-		BF $temp3[-]]$temp4[ // else
-			BF $temp1-#break // break
-		BF $temp4[-]]
-	BF $temp1]
-@_main
-	
-]==============================]))
-
---[====[
-
-	PUSH temp0 < >
-	X lazyPrint temp0 NICK\32f^vk\r\n
-	X lazyPrint temp0 USER\32brainf^vk\32~\32~\32:Brainfuck\32IRC\32bot\r\n
-
-	PUSH temp1 < >
-	PUSH temp2 < >
-	PUSH temp3 < >
-	PUSH temp4 < >
-	PUSH continue < >
-	PUSHSTACK ^S s0 s1
-	BF $continue[-]+[
-		X String.readLine s0:rawLine
-		BF $temp0[-]+32
-		BF $temp0[-]
-
-		// temp0 is our current index in s0:rawLine
-		BF $temp0[-]+2
-
-		X String.push s0:user // ex. ping!~PixelToast@me.pxtst.com
-		X irc_readParam s0:user
-		X String.push s0:command // ex. PRIVMSG
-		X irc_readParam s0:command
-
-		// parse commands
-		X String.println s0:user
-		X String.println s0:command
-
-		BF $temp1[-]+1
-		X String.get s0:command
-		BF $temp1-80
-		X not temp1 temp2
-
-
-		BF $temp1[-]]
-
-	BF $continue]
-]====]
+print(out)
+local f = io.open("code.bf", "w")
+f:write(out)
+f:close()
